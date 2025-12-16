@@ -515,20 +515,6 @@ begin
 				end
 			end
 
-                        -- Apply fixed total discounts to the cart rather than individual products.
-                        insert into @discountsApplied
-                        (product_path, discount_order, discount_product_id, originating_product_id, product_student_id,
-                                eligible_for_entity_id, eligible_for_entity_type,
-                                waiver_code, student_id, account_id, amount)
-                        select ep.product_path, @i, ep.product_id, null, null, ep.eligible_for_entity_id, ep.eligible_for_entity_type,
-                                ep.waiver_code, null, coalesce(ep.account_id, fp.default_revenue_account_id),
-                                case when pr.cur_total_tmp + fp.product_sale_price > 0 then fp.product_sale_price else -pr.cur_total_tmp end
-                        from @eligibleProducts ep
-                        inner join fin_products fp on (ep.product_id = fp.product_id)
-                        inner join @pathResults pr on (pr.path_num = ep.product_path)
-                        where ep.discount_order = @i
-                        and fp.percent_or_fixed = 'fixedpersession'
-
                         -- Make sure discounts applied do not exceed product sales price.  If so, change discounted amount.
                         -- Account Id is null?  Use purchased product revenue account.
                         insert into @discountsApplied
@@ -611,14 +597,36 @@ begin
 					and discount_once_per_day = 1
 					and percent_or_fixed not in ('fixedpersession', 'totalpercent')
 				) d
-				where d.items > 1
-			)
+                                where d.items > 1
+                        )
 
-			update @pathResults
-			set cur_total_tmp = cur_total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = path_num), 0.0) 
+                        -- Apply fixed total discounts to the cart after product-level discounts and cap the cart total at zero.
+                        insert into @discountsApplied
+                        (product_path, discount_order, discount_product_id, originating_product_id, product_student_id,
+                                eligible_for_entity_id, eligible_for_entity_type,
+                                waiver_code, student_id, account_id, amount)
+                        select ep.product_path, @i, ep.product_id, null, null, ep.eligible_for_entity_id, ep.eligible_for_entity_type,
+                                ep.waiver_code, null, coalesce(ep.account_id, fp.default_revenue_account_id),
+                                case
+                                        when ct.current_total > 0 and ct.current_total + fp.product_sale_price > 0 then fp.product_sale_price
+                                        when ct.current_total > 0 then -ct.current_total
+                                        else 0.0
+                                end
+                        from @eligibleProducts ep
+                        inner join fin_products fp on (ep.product_id = fp.product_id)
+                        inner join @pathResults pr on (pr.path_num = ep.product_path)
+                        cross apply (
+                                select coalesce(pr.cur_total, 0.0) +
+                                        coalesce((select sum(amount) from @discountsApplied d where d.product_path = ep.product_path), 0.0) as current_total
+                        ) ct
+                        where ep.discount_order = @i
+                        and fp.percent_or_fixed = 'fixedpersession'
 
-			update @eligibleProductProducts
-			set tmp_amount = null
+                        update @pathResults
+                        set cur_total_tmp = cur_total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = path_num), 0.0)
+
+                        update @eligibleProductProducts
+                        set tmp_amount = null
 			where tmp_amount is not null
 
 
