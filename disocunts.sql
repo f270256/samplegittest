@@ -429,14 +429,46 @@ begin
 
 
 	declare @i int = 1
-	if (@maxOrder >= 1)
-		while (@i <= @maxOrder and @i < 1000)
-		begin
+        if (@maxOrder >= 1)
+                while (@i <= @maxOrder and @i < 1000)
+                begin
 
-			-- Distribute Pick 3 fixed amount type logic:
-			-- Distribute absolute amount proportionally over all selected pick 3 items.  
-			-- Store result in temp amount which will be used instead of the fixed_amount
-			if exists (
+                        /*
+                         * Apply fixed total discounts at the cart level (no per-product allocation).
+                         * Respect stackable order and cap the discount so cart totals never go below zero.
+                         */
+                        insert into @discountsApplied
+                        (product_path, discount_order, discount_product_id, originating_product_id, product_student_id,
+                                eligible_for_entity_id, eligible_for_entity_type, waiver_code, student_id, account_id, amount)
+                        select ep.product_path, @i, ep.product_id, null, null,
+                                ep.eligible_for_entity_id, ep.eligible_for_entity_type, ep.waiver_code, null,
+                                coalesce(ep.account_id, fin_products.default_revenue_account_id),
+                                case
+                                        when coalesce(pr.cur_total_tmp, 0.0) <= 0 then 0
+                                        when ep.fixed_amount < 0 and coalesce(pr.cur_total_tmp, 0.0) + ep.fixed_amount < 0
+                                                then -1 * coalesce(pr.cur_total_tmp, 0.0)
+                                        else ep.fixed_amount
+                                end
+                        from @eligibleProducts ep
+                        inner join fin_products on (ep.product_id = fin_products.product_id)
+                        inner join @pathResults pr on (pr.path_num = ep.product_path)
+                        where ep.discount_order = @i
+                        and fin_products.percent_or_fixed = 'fixed';
+
+                        delete from @eligibleProducts
+                        where discount_order = @i
+                        and product_id in (
+                                select ep.product_id
+                                from @eligibleProducts ep
+                                inner join fin_products on (ep.product_id = fin_products.product_id)
+                                where ep.discount_order = @i
+                                and fin_products.percent_or_fixed = 'fixed'
+                        );
+
+                        -- Distribute Pick 3 fixed amount type logic:
+                        -- Distribute absolute amount proportionally over all selected pick 3 items.
+                        -- Store result in temp amount which will be used instead of the fixed_amount
+                        if exists (
 				select count(*)
 				from @eligibleProducts ep
 				inner join @eligibleProductProducts epp on (
