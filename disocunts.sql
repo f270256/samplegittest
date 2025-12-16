@@ -510,16 +510,21 @@ begin
 				and ep.fixed_amount <> 0.0
 				group by ep.fixed_amount
 
-				if (@remainder != 0.0)
-				begin
-					select @remainderId = max(id)
-					from @eligibleProductProducts
-					where abs(tmp_amount) > abs(@remainder)
+                                if (@remainder != 0.0)
+                                begin
+                                        select @remainderId = max(id)
+                                        from @eligibleProductProducts
+                                        where abs(tmp_amount) > abs(@remainder)
 
-					update @eligibleProductProducts
-					set tmp_amount = tmp_amount + @remainder
-					where id = @remainderId
-				end
+                                        if (@remainderId is null)
+                                                select top 1 @remainderId = id
+                                                from @eligibleProductProducts
+                                                order by abs(tmp_amount) desc, id desc
+
+                                        update @eligibleProductProducts
+                                        set tmp_amount = tmp_amount + @remainder
+                                        where id = @remainderId
+                                end
 			end
 
 			-- Make sure discounts applied do not exceed product sales price.  If so, change discounted amount.
