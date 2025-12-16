@@ -456,31 +456,46 @@ begin
 					@remainder decimal(18,2),
 					@remainderId int
 
-				select @itemCount = count(*), @itemTotal = sum(fin_products.product_sale_price)
-				from @eligibleProducts ep
-				inner join @eligibleProductProducts epp on (
-					epp.discount_product_id = ep.product_id
-					and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
-					and epp.eligible_for_entity_id = ep.eligible_for_entity_id
-					and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
-				)
-				inner join fin_products on
-					(epp.purchase_product_id = fin_products.product_id)
-				where ep.discount_order = @i 
+                                select @itemCount = count(*), @itemTotal = sum(case when fin_products.product_sale_price + coalesce(d_discounts.cur_discounted_total, 0.0) < 0 then 0.0 else fin_products.product_sale_price + coalesce(d_discounts.cur_discounted_total, 0.0) end)
+                                from @eligibleProducts ep
+                                inner join @eligibleProductProducts epp on (
+                                        epp.discount_product_id = ep.product_id
+                                        and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
+                                        and epp.eligible_for_entity_id = ep.eligible_for_entity_id
+                                        and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
+                                )
+                                inner join fin_products on
+                                        (epp.purchase_product_id = fin_products.product_id)
+                                left join (
+                                        select product_path, product_student_id, sum(amount) cur_discounted_total
+                                        from @discountsApplied
+                                        group by product_path, product_student_id
+                                ) d_discounts on
+                                  (d_discounts.product_path = ep.product_path and d_discounts.product_student_id = epp.product_student_id)
+                                where ep.discount_order = @i
 
-				update @eligibleProductProducts
-				set tmp_amount = ep.fixed_amount * fin_products.product_sale_price / @itemTotal
-				from @eligibleProducts ep
-				inner join @eligibleProductProducts epp on (
-					epp.discount_product_id = ep.product_id
-					and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
-					and epp.eligible_for_entity_id = ep.eligible_for_entity_id
-					and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
-				)
-				inner join fin_products on
-					(epp.purchase_product_id = fin_products.product_id)
-				where ep.discount_order = @i 
-				and ep.fixed_amount <> 0.0
+                                if (coalesce(@itemTotal, 0.0) = 0.0)
+                                        set @itemTotal = 1.0
+
+                                update @eligibleProductProducts
+                                set tmp_amount = ep.fixed_amount * (case when fin_products.product_sale_price + coalesce(d_discounts.cur_discounted_total, 0.0) < 0 then 0.0 else fin_products.product_sale_price + coalesce(d_discounts.cur_discounted_total, 0.0) end) / @itemTotal
+                                from @eligibleProducts ep
+                                inner join @eligibleProductProducts epp on (
+                                        epp.discount_product_id = ep.product_id
+                                        and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
+                                        and epp.eligible_for_entity_id = ep.eligible_for_entity_id
+                                        and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
+                                )
+                                inner join fin_products on
+                                        (epp.purchase_product_id = fin_products.product_id)
+                                left join (
+                                        select product_path, product_student_id, sum(amount) cur_discounted_total
+                                        from @discountsApplied
+                                        group by product_path, product_student_id
+                                ) d_discounts on
+                                  (d_discounts.product_path = ep.product_path and d_discounts.product_student_id = epp.product_student_id)
+                                where ep.discount_order = @i
+                                and ep.fixed_amount <> 0.0
 
 				
 				select @remainder =  ep.fixed_amount - sum(tmp_amount)
