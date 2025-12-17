@@ -666,9 +666,7 @@ begin
 				(t.target_id = da.id)
 
 			update @pathResults
-			set cur_total_tmp = case when cur_total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = path_num), 0.0) < 0.0
-				then 0.0
-				else cur_total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = path_num), 0.0) end 
+			set cur_total_tmp = cur_total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = path_num), 0.0)
 
 			update @eligibleProductProducts
 			set tmp_amount = null
@@ -680,7 +678,10 @@ begin
 
 
 	update @pathResults
-	set cur_total = (select sum(amount) from @discountsApplied d where d.product_path = pr.path_num)
+	set cur_total = case 
+		when @total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = pr.path_num), 0.0) < 0.0 
+			then -@total
+		else (select sum(amount) from @discountsApplied d where d.product_path = pr.path_num) end
 	from @pathResults pr
 
 	--calculate the highest discount combination and apply it
