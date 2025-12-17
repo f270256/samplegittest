@@ -592,19 +592,24 @@ begin
 			set cur_total_tmp = cur_total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = path_num), 0.0) 
 
 			update @eligibleProductProducts
-			set tmp_amount = null
-			where tmp_amount is not null
+				set tmp_amount = null
+				where tmp_amount is not null
 
 
-			set @i = @i + 1
-		end 
+				set @i = @i + 1
+			end 
 
 
-	update @pathResults
-	set cur_total = (select sum(amount) from @discountsApplied d where d.product_path = pr.path_num)
-	from @pathResults pr
+		update @pathResults
+		set cur_total_tmp = @total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = pr.path_num), 0.0)
+		from @pathResults pr
 
-	--calculate the highest discount combination and apply it
+		update @pathResults
+		set cur_total = (select sum(amount) from @discountsApplied d where d.product_path = pr.path_num)
+		from @pathResults pr
+
+
+		--calculate the highest discount combination and apply it
 	-- For example, two stackable discounts $10 and $15 and one non-stackable $20. 
 	-- Because 10+15=25 > 20, you apply first two. Otherwise, you would apply the non-stackable discount
 
@@ -638,6 +643,62 @@ begin
 				and path_num > 0
 			)t where order_number = 1
 			and coalesce(eligible_for_entity_type, 'xxx') = @nonStackableType
+
+	-- Cap fixed discounts only after the best path has been chosen to avoid premature reductions
+	declare @finalTotal decimal(18,2) = @total + coalesce((
+		select sum(amount)
+		from @discountsApplied da
+		inner join @bestPath bp on (bp.path_num = da.product_path)
+	), 0.0)
+
+	if (@finalTotal < 0.0)
+	begin
+		declare @fixedCaps table (row_num int identity(1,1), discount_row_id int, discount_amount decimal(18,2))
+		insert into @fixedCaps (discount_row_id, discount_amount)
+		select da.id, da.amount
+		from @discountsApplied da
+		inner join fin_products p on (da.discount_product_id = p.product_id)
+		inner join @bestPath bp on (bp.path_num = da.product_path)
+		where p.percent_or_fixed in ('fixed', 'fixedpersession')
+		order by da.discount_order desc, da.id desc
+
+		declare @overshoot decimal(18,2) = @finalTotal
+		declare @capCount int, @capIndex int = 1
+		select @capCount = count(*) from @fixedCaps
+
+		while (@overshoot < 0.0 and @capIndex <= @capCount)
+		begin
+			declare @discountRowId int, @discountAmount decimal(18,2), @adjustment decimal(18,2) = 0.0
+			select @discountRowId = discount_row_id, @discountAmount = discount_amount
+			from @fixedCaps
+			where row_num = @capIndex
+
+			if (@discountAmount < 0.0)
+			begin
+				set @adjustment = case when -@discountAmount >= -@overshoot then -@overshoot else -@discountAmount end
+
+				if (@adjustment > 0.0)
+				begin
+					set @discountAmount = @discountAmount + @adjustment
+					update @discountsApplied
+					set amount = @discountAmount
+					where id = @discountRowId
+
+					set @overshoot = @overshoot + @adjustment
+				end
+			end
+
+			set @capIndex = @capIndex + 1
+		end
+	end
+
+	update @pathResults
+	set cur_total_tmp = @total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = pr.path_num), 0.0)
+	from @pathResults pr
+
+	update @pathResults
+	set cur_total = (select sum(amount) from @discountsApplied d where d.product_path = pr.path_num)
+	from @pathResults pr
 
 	declare @ret table (
 		row_id int identity(1,1),
