@@ -624,7 +624,7 @@ begin
 		and p.percent_or_fixed in ('fixed', 'fixedpersession')
 		order by da.discount_order, da.id
 
-		declare @runningTotal decimal(18,2) = @total + coalesce((
+		declare @baseTotal decimal(18,2) = @total + coalesce((
 			select sum(amount)
 			from @discountsApplied da
 			inner join fin_products p on (da.discount_product_id = p.product_id)
@@ -632,39 +632,40 @@ begin
 			and p.percent_or_fixed not in ('fixed', 'fixedpersession')
 		), 0.0)
 
-		if (@runningTotal < 0.0) set @runningTotal = 0.0
+		if (@baseTotal < 0.0) set @baseTotal = 0.0
 
-		declare @fixedIndex int = 1
-		declare @fixedCount int
-		select @fixedCount = count(*) from @fixedDiscounts
+		declare @fixedSum decimal(18,2)
+		select @fixedSum = coalesce(sum(discount_amount), 0.0) from @fixedDiscounts
 
-		while (@fixedIndex <= @fixedCount)
+		if (@baseTotal + @fixedSum < 0.0)
 		begin
-			declare @discountRowId int, @discountAmount decimal(18,2)
-			select @discountRowId = discount_row_id, @discountAmount = discount_amount
-			from @fixedDiscounts
-			where row_num = @fixedIndex
+			declare @overshoot decimal(18,2) = @baseTotal + @fixedSum
+			declare @fixedIndex int
+			select @fixedIndex = max(row_num) from @fixedDiscounts
 
-			if (@runningTotal + @discountAmount < 0.0)
+			while (@overshoot < 0.0 and @fixedIndex >= 1)
 			begin
-				set @discountAmount = -@runningTotal
-				update @discountsApplied
-				set amount = @discountAmount
-				where id = @discountRowId
+				declare @discountRowId int, @discountAmount decimal(18,2), @adjustment decimal(18,2) = 0.0
+				select @discountRowId = discount_row_id, @discountAmount = discount_amount
+				from @fixedDiscounts
+				where row_num = @fixedIndex
 
-				set @runningTotal = 0.0
+				if (@discountAmount < 0.0)
+				begin
+					set @adjustment = case when -@discountAmount >= -@overshoot then -@overshoot else -@discountAmount end
 
-				update @discountsApplied
-				set amount = 0.0
-				where product_path = @currentPath
-				and id in (select discount_row_id from @fixedDiscounts where row_num > @fixedIndex)
+					if (@adjustment > 0.0)
+					begin
+						set @discountAmount = @discountAmount + @adjustment
+						update @discountsApplied
+						set amount = @discountAmount
+						where id = @discountRowId
 
-				set @fixedIndex = @fixedCount + 1
-			end
-			else
-			begin
-				set @runningTotal = @runningTotal + @discountAmount
-				set @fixedIndex = @fixedIndex + 1
+						set @overshoot = @overshoot + @adjustment
+					end
+				end
+
+				set @fixedIndex = @fixedIndex - 1
 			end
 		end
 
