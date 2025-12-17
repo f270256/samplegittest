@@ -416,12 +416,19 @@ begin
 
 	update @eligibleProducts
 	set discount_order = new_order
-	from @eligibleProducts ep, (
-		select id,
-			row_number() over (order by discount_order, id) new_order
-		from @eligibleProducts
-	) d
-	where ep.id = d.id
+	from @eligibleProducts ep
+	inner join (
+		select ep.id,
+			row_number() over (
+				order by 
+					case when fp.percent_or_fixed in ('fixed', 'fixedpersession') then 1 else 0 end,
+					ep.discount_order,
+					ep.id
+			) new_order
+		from @eligibleProducts ep
+		inner join fin_products fp on
+			(fp.product_id = ep.product_id)
+	) d on ep.id = d.id
 
 	declare @maxOrder int
 	select @maxOrder = max(discount_order) 
@@ -588,8 +595,80 @@ begin
 				where d.items > 1
 			)
 
+			declare @overages table (
+				path_num int,
+				overage decimal(18,2),
+				total_fixed decimal(18,2)
+			)
+
+			insert into @overages (path_num, overage, total_fixed)
+			select ot.product_path, -(ot.total_before + ot.applied_total) overage, fs.fixed_total
+			from (
+				select da.product_path, pr.cur_total_tmp as total_before, sum(da.amount) as applied_total
+				from @discountsApplied da
+				inner join @pathResults pr on
+					(pr.path_num = da.product_path)
+				where da.discount_order = @i
+				group by da.product_path, pr.cur_total_tmp
+			) ot
+			inner join (
+				select da.product_path, sum(da.amount) as fixed_total
+				from @discountsApplied da
+				inner join fin_products fp on
+					(fp.product_id = da.discount_product_id)
+				where da.discount_order = @i
+				and fp.percent_or_fixed in ('fixed', 'fixedpersession')
+				group by da.product_path
+			) fs on
+				(fs.product_path = ot.product_path)
+			where (ot.total_before + ot.applied_total) < 0
+			and fs.fixed_total <> 0.0
+
+			update da
+			set amount = amount + (o.overage * (da.amount / o.total_fixed))
+			from @discountsApplied da
+			inner join fin_products fp on
+				(fp.product_id = da.discount_product_id)
+			inner join @overages o on
+				(o.path_num = da.product_path)
+			where da.discount_order = @i
+			and fp.percent_or_fixed in ('fixed', 'fixedpersession')
+
+			;with final_totals as (
+				select da.product_path, pr.cur_total_tmp as total_before, sum(da.amount) as applied_total
+				from @discountsApplied da
+				inner join @pathResults pr on
+					(pr.path_num = da.product_path)
+				where da.discount_order = @i
+				group by da.product_path, pr.cur_total_tmp
+			), remainders as (
+				select ft.product_path, -(ft.total_before + ft.applied_total) as remainder
+				from final_totals ft
+				inner join @overages o on
+					(o.path_num = ft.product_path)
+				where (ft.total_before + ft.applied_total) < 0
+			), targets as (
+				select r.product_path, r.remainder,
+					(select top 1 da2.id
+						from @discountsApplied da2
+						inner join fin_products fp2 on
+							(fp2.product_id = da2.discount_product_id)
+						where da2.discount_order = @i
+						and da2.product_path = r.product_path
+						and fp2.percent_or_fixed in ('fixed', 'fixedpersession')
+						order by abs(da2.amount) desc, da2.id desc) as target_id
+				from remainders r
+			)
+			update da
+			set amount = amount + t.remainder
+			from @discountsApplied da
+			inner join targets t on
+				(t.target_id = da.id)
+
 			update @pathResults
-			set cur_total_tmp = cur_total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = path_num), 0.0) 
+			set cur_total_tmp = case when cur_total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = path_num), 0.0) < 0.0
+				then 0.0
+				else cur_total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = path_num), 0.0) end 
 
 			update @eligibleProductProducts
 			set tmp_amount = null
