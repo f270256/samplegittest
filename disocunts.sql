@@ -437,63 +437,71 @@ begin
 			-- Distribute absolute amount proportionally over all selected pick 3 items.  
 			-- Store result in temp amount which will be used instead of the fixed_amount
 			if exists (
-				select count(*)
-				from @eligibleProducts ep
-				inner join @eligibleProductProducts epp on (
-					epp.discount_product_id = ep.product_id
-					and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
-					and epp.eligible_for_entity_id = ep.eligible_for_entity_id
-					and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
-				)
-				where ep.fixed_amount <> 0.0
-				and ep.account_id is null
-				having count(*) > 1
-			)
-			begin
+                        select count(*)
+                        from @eligibleProducts ep
+                        inner join fin_products fp on (ep.product_id = fp.product_id)
+                        inner join @eligibleProductProducts epp on (
+                                        epp.discount_product_id = ep.product_id
+                                        and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
+                                        and epp.eligible_for_entity_id = ep.eligible_for_entity_id
+                                        and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
+                                )
+                                where ep.fixed_amount <> 0.0
+                                and ep.account_id is null
+                                and fp.percent_or_fixed <> 'fixedpersession'
+                                having count(*) > 1
+                        )
+                        begin
 
 				declare @itemCount int, 
 					@itemTotal decimal(18,2),
 					@remainder decimal(18,2),
 					@remainderId int
 
-				select @itemCount = count(*), @itemTotal = sum(fin_products.product_sale_price)
-				from @eligibleProducts ep
-				inner join @eligibleProductProducts epp on (
-					epp.discount_product_id = ep.product_id
-					and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
-					and epp.eligible_for_entity_id = ep.eligible_for_entity_id
-					and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
-				)
-				inner join fin_products on
-					(epp.purchase_product_id = fin_products.product_id)
-				where ep.discount_order = @i 
+                                select @itemCount = count(*), @itemTotal = sum(fin_products.product_sale_price)
+                                from @eligibleProducts ep
+                                inner join fin_products fp on (ep.product_id = fp.product_id)
+                                inner join @eligibleProductProducts epp on (
+                                        epp.discount_product_id = ep.product_id
+                                        and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
+                                        and epp.eligible_for_entity_id = ep.eligible_for_entity_id
+                                        and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
+                                )
+                                inner join fin_products on
+                                        (epp.purchase_product_id = fin_products.product_id)
+                                where ep.discount_order = @i
+                                and fp.percent_or_fixed <> 'fixedpersession'
 
-				update @eligibleProductProducts
-				set tmp_amount = ep.fixed_amount * fin_products.product_sale_price / @itemTotal
-				from @eligibleProducts ep
-				inner join @eligibleProductProducts epp on (
-					epp.discount_product_id = ep.product_id
-					and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
-					and epp.eligible_for_entity_id = ep.eligible_for_entity_id
-					and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
-				)
-				inner join fin_products on
-					(epp.purchase_product_id = fin_products.product_id)
-				where ep.discount_order = @i 
-				and ep.fixed_amount <> 0.0
+                                update @eligibleProductProducts
+                                set tmp_amount = ep.fixed_amount * fin_products.product_sale_price / @itemTotal
+                                from @eligibleProducts ep
+                                inner join fin_products fp on (ep.product_id = fp.product_id)
+                                inner join @eligibleProductProducts epp on (
+                                        epp.discount_product_id = ep.product_id
+                                        and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
+                                        and epp.eligible_for_entity_id = ep.eligible_for_entity_id
+                                        and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
+                                )
+                                inner join fin_products on
+                                        (epp.purchase_product_id = fin_products.product_id)
+                                where ep.discount_order = @i
+                                and ep.fixed_amount <> 0.0
+                                and fp.percent_or_fixed <> 'fixedpersession'
 
-				
-				select @remainder =  ep.fixed_amount - sum(tmp_amount)
-				from @eligibleProducts ep
-				inner join @eligibleProductProducts epp on (
-					epp.discount_product_id = ep.product_id
-					and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
-					and epp.eligible_for_entity_id = ep.eligible_for_entity_id
-					and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
-				)
-				where ep.discount_order = @i 
-				and ep.fixed_amount <> 0.0
-				group by ep.fixed_amount
+
+                                select @remainder =  ep.fixed_amount - sum(tmp_amount)
+                                from @eligibleProducts ep
+                                inner join fin_products fp on (ep.product_id = fp.product_id)
+                                inner join @eligibleProductProducts epp on (
+                                        epp.discount_product_id = ep.product_id
+                                        and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
+                                        and epp.eligible_for_entity_id = ep.eligible_for_entity_id
+                                        and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
+                                )
+                                where ep.discount_order = @i
+                                and ep.fixed_amount <> 0.0
+                                and fp.percent_or_fixed <> 'fixedpersession'
+                                group by ep.fixed_amount
 
 				if (@remainder != 0.0)
 				begin
@@ -507,71 +515,75 @@ begin
 				end
 			end
 
-			-- Make sure discounts applied do not exceed product sales price.  If so, change discounted amount.
-			-- Account Id is null?  Use purchased product revenue account.
-			insert into @discountsApplied
-			(product_path, discount_order, discount_product_id, originating_product_id, product_student_id,
-				eligible_for_entity_id, eligible_for_entity_type, 
-				waiver_code, student_id, account_id, amount)
-			-- ep.account_id is null, tmp_amount may be specified.
-			select ep.product_path, @i, epp.discount_product_id, epp.purchase_product_Id, epp.product_student_id, ep.eligible_for_entity_id, ep.eligible_for_entity_type,
-				ep.waiver_code, epp.student_id, coalesce(ep.account_id, fin_products.default_revenue_account_id), 
-				case when ep.actual_amount is not null then ep.actual_amount - fin_products.product_sale_price
-					when fin_products.product_sale_price +
-						(coalesce(cur_discounted_total, 0.0) + coalesce(tmp_amount, fixed_amount) + percent_amount * fin_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts) > 0
-					then coalesce(tmp_amount, fixed_amount) + percent_amount * fin_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts
-					else - coalesce(cur_discounted_total, 0.0) - fin_products.product_sale_price
-					end
-			from @eligibleProducts ep
-			inner join @eligibleProductProducts epp on
-			  (epp.discount_product_id = ep.product_id
-			   and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
-			   and epp.eligible_for_entity_id = ep.eligible_for_entity_id
-			   and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ'))
-			inner join fin_products on
-			  (epp.purchase_product_id = fin_products.product_id)
-			left join (
-				select product_path, sum(amount) cur_discounted_total, product_student_id
-				from @discountsApplied
-				group by product_path, product_student_id
-			) d_discounts on
-			  (d_discounts.product_path = ep.product_path and d_discounts.product_student_id = epp.product_student_id)
-			left join @pathResults d_total_discounts on
-			  (d_total_discounts.path_num = ep.product_path)
-			where ep.discount_order = @i
-			and ep.account_id is null
+                        -- Make sure discounts applied do not exceed product sales price.  If so, change discounted amount.
+                        -- Account Id is null?  Use purchased product revenue account.
+                        insert into @discountsApplied
+                        (product_path, discount_order, discount_product_id, originating_product_id, product_student_id,
+                                eligible_for_entity_id, eligible_for_entity_type,
+                                waiver_code, student_id, account_id, amount)
+                        -- ep.account_id is null, tmp_amount may be specified.
+                        select ep.product_path, @i, epp.discount_product_id, epp.purchase_product_Id, epp.product_student_id, ep.eligible_for_entity_id, ep.eligible_for_entity_type,
+                                ep.waiver_code, epp.student_id, coalesce(ep.account_id, purchase_products.default_revenue_account_id),
+                                case when ep.actual_amount is not null then ep.actual_amount - purchase_products.product_sale_price
+                                        when purchase_products.product_sale_price +
+                                                (coalesce(cur_discounted_total, 0.0) + coalesce(tmp_amount, fixed_amount) + percent_amount * purchase_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts) > 0
+                                        then coalesce(tmp_amount, fixed_amount) + percent_amount * purchase_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts
+                                        else - coalesce(cur_discounted_total, 0.0) - purchase_products.product_sale_price
+                                        end
+                        from @eligibleProducts ep
+                        inner join fin_products discount_products on (ep.product_id = discount_products.product_id)
+                        inner join @eligibleProductProducts epp on
+                          (epp.discount_product_id = ep.product_id
+                           and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
+                           and epp.eligible_for_entity_id = ep.eligible_for_entity_id
+                           and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ'))
+                        inner join fin_products purchase_products on
+                          (epp.purchase_product_id = purchase_products.product_id)
+                        left join (
+                                select product_path, sum(amount) cur_discounted_total, product_student_id
+                                from @discountsApplied
+                                group by product_path, product_student_id
+                        ) d_discounts on
+                          (d_discounts.product_path = ep.product_path and d_discounts.product_student_id = epp.product_student_id)
+                        left join @pathResults d_total_discounts on
+                          (d_total_discounts.path_num = ep.product_path)
+                        where ep.discount_order = @i
+                        and ep.account_id is null
+                        and discount_products.percent_or_fixed <> 'fixedpersession'
 
-			union all
+                        union all
 
-			-- ep.account_id is not null.  Use discount product's account_id
-			select ep.product_path, @i, ep.product_id, purchase_product_Id,  epp.product_student_id, ep.eligible_for_entity_id, ep.eligible_for_entity_type,
-				ep.waiver_code, epp.student_id, ep.account_id, 
-				case when ep.actual_amount is not null then ep.actual_amount - fin_products.product_sale_price
-					when fin_products.product_sale_price +
-						(coalesce(cur_discounted_total, 0.0) + coalesce(tmp_amount, fixed_amount) + percent_amount * fin_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts) > 0
-					then coalesce(tmp_amount, fixed_amount) + percent_amount * fin_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts
-					else - coalesce(cur_discounted_total, 0.0) - fin_products.product_sale_price
-					end
-			from @eligibleProducts ep			
-			inner join @eligibleProductProducts epp on
-			  (epp.discount_product_id = ep.product_id
-			   and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
-			   and epp.eligible_for_entity_id = ep.eligible_for_entity_id
-			   and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ'))
-			inner join fin_products on
-			  (epp.purchase_product_id = fin_products.product_id)
-			left join (
-				select product_path, sum(amount) cur_discounted_total, product_student_id
-				from @discountsApplied
-				group by product_path, product_student_id
-			) d_discounts on
-			  (d_discounts.product_path = ep.product_path and d_discounts.product_student_id = epp.product_student_id)
-			--inner join @pathResults on
-			--  (path_num = ep.product_path )
-			left join @pathResults d_total_discounts on
-			  (d_total_discounts.path_num = ep.product_path)
-			where ep.discount_order = @i
-			and ep.account_id is not null
+                        -- ep.account_id is not null.  Use discount product's account_id
+                        select ep.product_path, @i, ep.product_id, purchase_product_Id,  epp.product_student_id, ep.eligible_for_entity_id, ep.eligible_for_entity_type,
+                                ep.waiver_code, epp.student_id, ep.account_id,
+                                case when ep.actual_amount is not null then ep.actual_amount - purchase_products.product_sale_price
+                                        when purchase_products.product_sale_price +
+                                                (coalesce(cur_discounted_total, 0.0) + coalesce(tmp_amount, fixed_amount) + percent_amount * purchase_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts) > 0
+                                        then coalesce(tmp_amount, fixed_amount) + percent_amount * purchase_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts
+                                        else - coalesce(cur_discounted_total, 0.0) - purchase_products.product_sale_price
+                                        end
+                        from @eligibleProducts ep
+                        inner join fin_products discount_products on (ep.product_id = discount_products.product_id)
+                        inner join @eligibleProductProducts epp on
+                          (epp.discount_product_id = ep.product_id
+                           and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
+                           and epp.eligible_for_entity_id = ep.eligible_for_entity_id
+                           and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ'))
+                        inner join fin_products purchase_products on
+                          (epp.purchase_product_id = purchase_products.product_id)
+                        left join (
+                                select product_path, sum(amount) cur_discounted_total, product_student_id
+                                from @discountsApplied
+                                group by product_path, product_student_id
+                        ) d_discounts on
+                          (d_discounts.product_path = ep.product_path and d_discounts.product_student_id = epp.product_student_id)
+                        --inner join @pathResults on
+                        --  (path_num = ep.product_path )
+                        left join @pathResults d_total_discounts on
+                          (d_total_discounts.path_num = ep.product_path)
+                        where ep.discount_order = @i
+                        and ep.account_id is not null
+                        and discount_products.percent_or_fixed <> 'fixedpersession'
 			
 						-- Once per Day discounts
 			delete from @discountsApplied
@@ -585,14 +597,38 @@ begin
 					and discount_once_per_day = 1
 					and percent_or_fixed not in ('fixedpersession', 'totalpercent')
 				) d
-				where d.items > 1
-			)
+                                where d.items > 1
+                        )
 
-			update @pathResults
-			set cur_total_tmp = cur_total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = path_num), 0.0) 
+                        -- Apply fixed total discounts to the cart after product-level discounts and cap the cart total at zero.
+                        insert into @discountsApplied
+                        (product_path, discount_order, discount_product_id, originating_product_id, product_student_id,
+                                eligible_for_entity_id, eligible_for_entity_type,
+                                waiver_code, student_id, account_id, amount)
+                        select ep.product_path, @i, ep.product_id, null, null, ep.eligible_for_entity_id, ep.eligible_for_entity_type,
+                                ep.waiver_code,
+                                case when ep.eligible_for_entity_type = 'Student' then ep.eligible_for_entity_id else null end,
+                                coalesce(ep.account_id, fp.default_revenue_account_id),
+                                case
+                                        when ct.current_total > 0 and ct.current_total + fp.product_sale_price > 0 then fp.product_sale_price
+                                        when ct.current_total > 0 then -ct.current_total
+                                        else 0.0
+                                end
+                        from @eligibleProducts ep
+                        inner join fin_products fp on (ep.product_id = fp.product_id)
+                        inner join @pathResults pr on (pr.path_num = ep.product_path)
+                        cross apply (
+                                select coalesce(pr.cur_total, 0.0) +
+                                        coalesce((select sum(amount) from @discountsApplied d where d.product_path = ep.product_path), 0.0) as current_total
+                        ) ct
+                        where ep.discount_order = @i
+                        and fp.percent_or_fixed = 'fixedpersession'
 
-			update @eligibleProductProducts
-			set tmp_amount = null
+                        update @pathResults
+                        set cur_total_tmp = cur_total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = path_num), 0.0)
+
+                        update @eligibleProductProducts
+                        set tmp_amount = null
 			where tmp_amount is not null
 
 
