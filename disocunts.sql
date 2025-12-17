@@ -600,6 +600,81 @@ begin
 		end 
 
 
+	-- Apply fixed discounts after per-product discounts and cap to keep totals non-negative
+	declare @pathList table (row_num int identity(1,1), path_num int)
+
+	insert into @pathList (path_num)
+	select path_num
+	from @pathResults
+
+	declare @pathListCount int, @pathListIndex int = 1
+	select @pathListCount = count(*) from @pathList
+
+	while (@pathListIndex <= @pathListCount)
+	begin
+		declare @currentPath int
+		select @currentPath = path_num from @pathList where row_num = @pathListIndex
+
+		declare @fixedDiscounts table (row_num int identity(1,1), discount_row_id int, discount_amount decimal(18,2))
+		insert into @fixedDiscounts (discount_row_id, discount_amount)
+		select da.id, da.amount
+		from @discountsApplied da
+		inner join fin_products p on (da.discount_product_id = p.product_id)
+		where da.product_path = @currentPath
+		and p.percent_or_fixed in ('fixed', 'fixedpersession')
+		order by da.discount_order, da.id
+
+		declare @runningTotal decimal(18,2) = @total + coalesce((
+			select sum(amount)
+			from @discountsApplied da
+			inner join fin_products p on (da.discount_product_id = p.product_id)
+			where da.product_path = @currentPath
+			and p.percent_or_fixed not in ('fixed', 'fixedpersession')
+		), 0.0)
+
+		if (@runningTotal < 0.0) set @runningTotal = 0.0
+
+		declare @fixedIndex int = 1
+		declare @fixedCount int
+		select @fixedCount = count(*) from @fixedDiscounts
+
+		while (@fixedIndex <= @fixedCount)
+		begin
+			declare @discountRowId int, @discountAmount decimal(18,2)
+			select @discountRowId = discount_row_id, @discountAmount = discount_amount
+			from @fixedDiscounts
+			where row_num = @fixedIndex
+
+			if (@runningTotal + @discountAmount < 0.0)
+			begin
+				set @discountAmount = -@runningTotal
+				update @discountsApplied
+				set amount = @discountAmount
+				where id = @discountRowId
+
+				set @runningTotal = 0.0
+
+				update @discountsApplied
+				set amount = 0.0
+				where product_path = @currentPath
+				and id in (select discount_row_id from @fixedDiscounts where row_num > @fixedIndex)
+
+				set @fixedIndex = @fixedCount + 1
+			end
+			else
+			begin
+				set @runningTotal = @runningTotal + @discountAmount
+				set @fixedIndex = @fixedIndex + 1
+			end
+		end
+
+		set @pathListIndex = @pathListIndex + 1
+	end
+
+	update @pathResults
+	set cur_total_tmp = @total + coalesce((select sum(amount) from @discountsApplied d where d.product_path = pr.path_num), 0.0)
+	from @pathResults pr
+
 	update @pathResults
 	set cur_total = (select sum(amount) from @discountsApplied d where d.product_path = pr.path_num)
 	from @pathResults pr
