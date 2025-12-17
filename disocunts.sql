@@ -606,7 +606,9 @@ begin
                                 eligible_for_entity_id, eligible_for_entity_type,
                                 waiver_code, student_id, account_id, amount)
                         select ep.product_path, @i, ep.product_id, null, null, ep.eligible_for_entity_id, ep.eligible_for_entity_type,
-                                ep.waiver_code, null, coalesce(ep.account_id, fp.default_revenue_account_id),
+                                ep.waiver_code,
+                                case when ep.eligible_for_entity_type = 'Student' then ep.eligible_for_entity_id else null end,
+                                coalesce(ep.account_id, fp.default_revenue_account_id),
                                 case
                                         when ct.current_total > 0 and ct.current_total + fp.product_sale_price > 0 then fp.product_sale_price
                                         when ct.current_total > 0 then -ct.current_total
