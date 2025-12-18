@@ -35,7 +35,7 @@ begin
 					Discount Calculations
 	 ****************************************************************************/
 
-	declare @total decimal(18, 2)
+	declare @total decimal(18, 6)
 	declare @now datetime = dbo.pcr_fx_gettime()
 
 	-- Sales price to discount
@@ -43,7 +43,7 @@ begin
 	from [dbo].[fin_products], #productStudents ps
 	where ps.productId = fin_products.product_id
 
-	declare @totals table (total decimal(18, 2), eligible_for_entity_id int, eligible_for_entity_type varchar(20) )
+	declare @totals table (total decimal(18, 6), eligible_for_entity_id int, eligible_for_entity_type varchar(20) )
 	insert into @totals (total, eligible_for_entity_id, eligible_for_entity_type)
 	select sum(product_sale_price), ps.studentId, 'student'
 	from [dbo].[fin_products], #productStudents ps
@@ -64,10 +64,10 @@ begin
 		waiver_code varchar(50),
 		product_path int,
 		discount_order int,
-		fixed_amount decimal(18,2),
+		fixed_amount decimal(18,6),
 		percent_amount decimal(18,4),
 		total_percent_amount decimal(18,4),
-		actual_amount decimal(18,2)
+		actual_amount decimal(18,6)
 	)
 
 	declare @eligibleProductProducts table (
@@ -77,7 +77,7 @@ begin
 		eligible_for_entity_id int,
 		eligible_for_entity_type varchar(20),
 		waiver_code varchar(50),
-		tmp_amount decimal(18,2),
+		tmp_amount decimal(18,6),
 		student_id int,
 		product_student_id int
 	)
@@ -356,7 +356,7 @@ begin
 	-- Calculate best discount by stackability and order
 	-- case when percent_or_fixed = 'Percent' then 
 	update @eligibleProducts
-	set product_path = case when is_stackable = 1 then 0 else ep.id end,
+	set product_path = case when fin_products.is_stackable = 1 then 0 else ep.id end,
 		discount_order = fin_products.discount_order,
 		fixed_amount = case when percent_or_fixed = 'fixed' then product_sale_price
 			-- Evenly split discount between product if fixedpersession and discount_once_per_day is not set
@@ -376,7 +376,7 @@ begin
 	from @eligibleProducts ep, fin_products
 	where ep.product_id = fin_products.product_id
 	and eligible_for_entity_type = 'student'
-	and is_stackable = 1
+	and fin_products.is_stackable = 1
 
 
 	-- Evenly split discount between students.  Maybe should be prorated.
@@ -389,8 +389,8 @@ begin
 
 	declare @pathResults table (
 		path_num int,
-		cur_total decimal(18,2),
-		cur_total_tmp decimal(18,2)
+		cur_total decimal(18,6),
+		cur_total_tmp decimal(18,6)
 	)
 
 	insert into @pathResults
@@ -410,7 +410,7 @@ begin
 		student_id int,
 		waiver_code varchar(50),
 		account_id int,
-		amount decimal(18,2)
+		amount decimal(18,6)
 	)
 
 
@@ -445,15 +445,18 @@ begin
 					and epp.eligible_for_entity_id = ep.eligible_for_entity_id
 					and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
 				)
+				inner join fin_products dp on
+					(epp.discount_product_id = dp.product_id)
 				where ep.fixed_amount <> 0.0
 				and ep.account_id is null
+				and dp.percent_or_fixed <> 'fixedpersession'
 				having count(*) > 1
 			)
 			begin
 
 				declare @itemCount int, 
-					@itemTotal decimal(18,2),
-					@remainder decimal(18,2),
+					@itemTotal decimal(18,6),
+					@remainder decimal(18,6),
 					@remainderId int
 
 				select @itemCount = count(*), @itemTotal = sum(fin_products.product_sale_price)
@@ -464,9 +467,12 @@ begin
 					and epp.eligible_for_entity_id = ep.eligible_for_entity_id
 					and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
 				)
+				inner join fin_products dp on
+					(epp.discount_product_id = dp.product_id)
 				inner join fin_products on
 					(epp.purchase_product_id = fin_products.product_id)
 				where ep.discount_order = @i 
+				and dp.percent_or_fixed <> 'fixedpersession'
 
 				update @eligibleProductProducts
 				set tmp_amount = ep.fixed_amount * fin_products.product_sale_price / @itemTotal
@@ -477,12 +483,15 @@ begin
 					and epp.eligible_for_entity_id = ep.eligible_for_entity_id
 					and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
 				)
+				inner join fin_products dp on
+					(epp.discount_product_id = dp.product_id)
 				inner join fin_products on
 					(epp.purchase_product_id = fin_products.product_id)
 				where ep.discount_order = @i 
 				and ep.fixed_amount <> 0.0
+				and dp.percent_or_fixed <> 'fixedpersession'
 
-				
+
 				select @remainder =  ep.fixed_amount - sum(tmp_amount)
 				from @eligibleProducts ep
 				inner join @eligibleProductProducts epp on (
@@ -491,8 +500,11 @@ begin
 					and epp.eligible_for_entity_id = ep.eligible_for_entity_id
 					and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
 				)
+				inner join fin_products dp on
+					(epp.discount_product_id = dp.product_id)
 				where ep.discount_order = @i 
 				and ep.fixed_amount <> 0.0
+				and dp.percent_or_fixed <> 'fixedpersession'
 				group by ep.fixed_amount
 
 				if (@remainder != 0.0)
@@ -514,20 +526,22 @@ begin
 				eligible_for_entity_id, eligible_for_entity_type, 
 				waiver_code, student_id, account_id, amount)
 			-- ep.account_id is null, tmp_amount may be specified.
-			select ep.product_path, @i, epp.discount_product_id, epp.purchase_product_Id, epp.product_student_id, ep.eligible_for_entity_id, ep.eligible_for_entity_type,
-				ep.waiver_code, epp.student_id, coalesce(ep.account_id, fin_products.default_revenue_account_id), 
-				case when ep.actual_amount is not null then ep.actual_amount - fin_products.product_sale_price
-					when fin_products.product_sale_price +
-						(coalesce(cur_discounted_total, 0.0) + coalesce(tmp_amount, fixed_amount) + percent_amount * fin_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts) > 0
-					then coalesce(tmp_amount, fixed_amount) + percent_amount * fin_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts
-					else - coalesce(cur_discounted_total, 0.0) - fin_products.product_sale_price
-					end
+				select ep.product_path, @i, epp.discount_product_id, epp.purchase_product_Id, epp.product_student_id, ep.eligible_for_entity_id, ep.eligible_for_entity_type,
+					ep.waiver_code, epp.student_id, coalesce(ep.account_id, fin_products.default_revenue_account_id), 
+					case when ep.actual_amount is not null then ep.actual_amount - fin_products.product_sale_price
+						when fin_products.product_sale_price +
+							(coalesce(cur_discounted_total, 0.0) + coalesce(tmp_amount, fixed_amount) + percent_amount * fin_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts) > 0
+						then coalesce(tmp_amount, fixed_amount) + percent_amount * fin_products.product_sale_price + total_percent_amount * coalesce(cur_total_tmp, 0.0) / ep.count_of_product_discounts
+						else - coalesce(cur_discounted_total, 0.0) - fin_products.product_sale_price
+						end
 			from @eligibleProducts ep
 			inner join @eligibleProductProducts epp on
 			  (epp.discount_product_id = ep.product_id
 			   and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
 			   and epp.eligible_for_entity_id = ep.eligible_for_entity_id
 			   and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ'))
+			inner join fin_products dp on
+			  (dp.product_id = ep.product_id)
 			inner join fin_products on
 			  (epp.purchase_product_id = fin_products.product_id)
 			left join (
@@ -540,6 +554,7 @@ begin
 			  (d_total_discounts.path_num = ep.product_path)
 			where ep.discount_order = @i
 			and ep.account_id is null
+			and dp.percent_or_fixed <> 'fixedpersession'
 
 			union all
 
@@ -558,6 +573,8 @@ begin
 			   and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
 			   and epp.eligible_for_entity_id = ep.eligible_for_entity_id
 			   and coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ'))
+			inner join fin_products dp on
+			  (dp.product_id = ep.product_id)
 			inner join fin_products on
 			  (epp.purchase_product_id = fin_products.product_id)
 			left join (
@@ -572,6 +589,7 @@ begin
 			  (d_total_discounts.path_num = ep.product_path)
 			where ep.discount_order = @i
 			and ep.account_id is not null
+			and dp.percent_or_fixed <> 'fixedpersession'
 			
 						-- Once per Day discounts
 			delete from @discountsApplied
@@ -601,7 +619,7 @@ begin
 
 
 	update @pathResults
-	set cur_total = (select sum(amount) from @discountsApplied d where d.product_path = pr.path_num)
+	set cur_total = coalesce((select sum(case when amount < 0 then amount else 0 end) from @discountsApplied d where d.product_path = pr.path_num), 0.0)
 	from @pathResults pr
 
 	--calculate the highest discount combination and apply it
@@ -609,12 +627,12 @@ begin
 	-- Because 10+15=25 > 20, you apply first two. Otherwise, you would apply the non-stackable discount
 
 	declare @bestPath table(path_num int)
-	
+
 	--case 1 apply all stackable only
-	declare @stackableTotal decimal(18,2) = coalesce((select sum(cur_total) from @pathResults d where path_num = 0), 0.0)
+	declare @stackableTotal decimal(18,6) = coalesce((select sum(cur_total) from @pathResults d where path_num = 0), 0.0)
 
 	--case 2 apply non stackable only
-	declare @nonStackableTotal decimal(18,2) = 0.0
+	declare @nonStackableTotal decimal(18,6) = 0.0
 	declare @nonStackableType varchar(20)
 	select top 1 @nonStackableTotal =  coalesce(sum(cur_total), 0.0), @nonStackableType = coalesce(eligible_for_entity_type, 'xxx') 
 	from (select cur_total, ROW_NUMBER() over (partition by eligible_for_entity_id,  coalesce(eligible_for_entity_type, 'xxx') order by  cur_total asc) as order_number,
@@ -627,8 +645,8 @@ begin
 
 
 	if @nonStackableTotal > @stackableTotal
-		insert into @bestPath(path_num)
-			select 0
+			insert into @bestPath(path_num)
+				select 0
 	else 
 		insert into @bestPath(path_num)
 			select path_num from
@@ -639,12 +657,74 @@ begin
 			)t where order_number = 1
 			and coalesce(eligible_for_entity_type, 'xxx') = @nonStackableType
 
-	declare @ret table (
-		row_id int identity(1,1),
-		product_id int,
-		product_desc varchar(500),
+		-- Apply fixed-per-session discounts at the cart level after best path selection.
+		declare @cartTotal decimal(18,6) = @total + coalesce((select sum(amount) from @discountsApplied d, @bestPath bp where d.product_path = bp.path_num), 0.0)
+
+		declare @sessionDiscounts table (
+			id int identity(1,1),
+			product_path int,
+			discount_order int,
+			discount_product_id int,
+			waiver_code varchar(50),
+			account_id int,
+			amount decimal(18,6),
+			eligible_for_entity_id int,
+			eligible_for_entity_type varchar(20),
+			student_id int,
+			product_student_id int
+		)
+
+		insert into @sessionDiscounts (product_path, discount_order, discount_product_id, waiver_code, account_id, amount, eligible_for_entity_id, eligible_for_entity_type, student_id, product_student_id)
+		select ep.product_path, ep.discount_order, ep.product_id, ep.waiver_code, coalesce(ep.account_id, fp.default_revenue_account_id),
+			coalesce(ep.fixed_amount, fp.product_sale_price), ep.eligible_for_entity_id, ep.eligible_for_entity_type, epp.student_id, epp.product_student_id
+		from @eligibleProducts ep
+		inner join fin_products fp on (ep.product_id = fp.product_id)
+		inner join @bestPath bp on (bp.path_num = ep.product_path)
+		left join @eligibleProductProducts epp on (
+			epp.discount_product_id = ep.product_id
+			and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
+			and epp.eligible_for_entity_id = ep.eligible_for_entity_id
+			and coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
+		)
+		where fp.percent_or_fixed = 'fixedpersession'
+
+		declare @sMax int = (select count(*) from @sessionDiscounts)
+		declare @sIdx int = 1
+
+		while (@sIdx <= @sMax)
+		begin
+			declare @sPath int, @sOrder int, @sProduct int, @sWaiver varchar(50), @sAccount int, @sAmount decimal(18,6), @applyAmount decimal(18,6),
+				@sEligId int, @sEligType varchar(20), @sStudent int, @sProductStudent int
+			select @sPath = product_path, @sOrder = discount_order, @sProduct = discount_product_id, @sWaiver = waiver_code,
+				@sAccount = account_id, @sAmount = amount, @sEligId = eligible_for_entity_id, @sEligType = eligible_for_entity_type,
+				@sStudent = student_id, @sProductStudent = product_student_id
+			from (
+				select *, row_number() over (order by discount_order, product_path, discount_product_id, student_id, product_student_id) as rn
+				from @sessionDiscounts
+			) s
+			where rn = @sIdx
+
+			set @applyAmount = @sAmount
+			if (@sAmount < 0 and @cartTotal + @sAmount < 0)
+				set @applyAmount = case when @cartTotal < 0 then 0.0 else -@cartTotal end
+
+			set @cartTotal = @cartTotal + @applyAmount
+
+			insert into @discountsApplied
+			(product_path, discount_order, discount_product_id, originating_product_id, product_student_id,
+				eligible_for_entity_id, eligible_for_entity_type, 
+				waiver_code, student_id, account_id, amount)
+			values(@sPath, @sOrder, @sProduct, null, @sProductStudent, @sEligId, @sEligType, @sWaiver, @sStudent, @sAccount, @applyAmount)
+
+			set @sIdx = @sIdx + 1
+		end
+
+		declare @ret table (
+			row_id int identity(1,1),
+			product_id int,
+			product_desc varchar(500),
 		waiver_code varchar(50),
-		amount decimal(18,2), 
+		amount decimal(18,6), 
 		account_id int,
 		is_deposit bit,
 		student_id int
