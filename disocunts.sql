@@ -637,7 +637,11 @@ begin
 
 
 	update @pathResults
-	set cur_total = (select sum(amount) from @discountsApplied d where d.product_path = pr.path_num)
+	set cur_total = (
+		select sum(case when amount < 0 then amount else 0 end)
+		from @discountsApplied d
+		where d.product_path = pr.path_num
+	)
 	from @pathResults pr
 
 	--calculate the highest discount combination and apply it
