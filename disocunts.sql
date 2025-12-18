@@ -667,14 +667,25 @@ begin
 			discount_product_id int,
 			waiver_code varchar(50),
 			account_id int,
-			amount decimal(18,6)
+			amount decimal(18,6),
+			eligible_for_entity_id int,
+			eligible_for_entity_type varchar(20),
+			student_id int,
+			product_student_id int
 		)
 
-		insert into @sessionDiscounts (product_path, discount_order, discount_product_id, waiver_code, account_id, amount)
-		select ep.product_path, ep.discount_order, ep.product_id, ep.waiver_code, coalesce(ep.account_id, fp.default_revenue_account_id), fp.product_sale_price
+		insert into @sessionDiscounts (product_path, discount_order, discount_product_id, waiver_code, account_id, amount, eligible_for_entity_id, eligible_for_entity_type, student_id, product_student_id)
+		select ep.product_path, ep.discount_order, ep.product_id, ep.waiver_code, coalesce(ep.account_id, fp.default_revenue_account_id),
+			coalesce(ep.fixed_amount, fp.product_sale_price), ep.eligible_for_entity_id, ep.eligible_for_entity_type, epp.student_id, epp.product_student_id
 		from @eligibleProducts ep
 		inner join fin_products fp on (ep.product_id = fp.product_id)
 		inner join @bestPath bp on (bp.path_num = ep.product_path)
+		left join @eligibleProductProducts epp on (
+			epp.discount_product_id = ep.product_id
+			and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
+			and epp.eligible_for_entity_id = ep.eligible_for_entity_id
+			and coalesce(epp.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ') = coalesce(ep.waiver_code, 'ZZZZZZZZZZZZZZZZZZZZZZZZ')
+		)
 		where fp.percent_or_fixed = 'fixedpersession'
 
 		declare @sMax int = (select count(*) from @sessionDiscounts)
@@ -682,11 +693,13 @@ begin
 
 		while (@sIdx <= @sMax)
 		begin
-			declare @sPath int, @sOrder int, @sProduct int, @sWaiver varchar(50), @sAccount int, @sAmount decimal(18,6), @applyAmount decimal(18,6)
+			declare @sPath int, @sOrder int, @sProduct int, @sWaiver varchar(50), @sAccount int, @sAmount decimal(18,6), @applyAmount decimal(18,6),
+				@sEligId int, @sEligType varchar(20), @sStudent int, @sProductStudent int
 			select @sPath = product_path, @sOrder = discount_order, @sProduct = discount_product_id, @sWaiver = waiver_code,
-				@sAccount = account_id, @sAmount = amount
+				@sAccount = account_id, @sAmount = amount, @sEligId = eligible_for_entity_id, @sEligType = eligible_for_entity_type,
+				@sStudent = student_id, @sProductStudent = product_student_id
 			from (
-				select *, row_number() over (order by discount_order, product_path, discount_product_id) as rn
+				select *, row_number() over (order by discount_order, product_path, discount_product_id, student_id, product_student_id) as rn
 				from @sessionDiscounts
 			) s
 			where rn = @sIdx
@@ -701,7 +714,7 @@ begin
 			(product_path, discount_order, discount_product_id, originating_product_id, product_student_id,
 				eligible_for_entity_id, eligible_for_entity_type, 
 				waiver_code, student_id, account_id, amount)
-			values(@sPath, @sOrder, @sProduct, null, null, 0, null, @sWaiver, null, @sAccount, @applyAmount)
+			values(@sPath, @sOrder, @sProduct, null, @sProductStudent, @sEligId, @sEligType, @sWaiver, @sStudent, @sAccount, @applyAmount)
 
 			set @sIdx = @sIdx + 1
 		end
