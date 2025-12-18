@@ -35,7 +35,7 @@ begin
 					Discount Calculations
 	 ****************************************************************************/
 
-	declare @total decimal(18, 2)
+	declare @total decimal(18, 6)
 	declare @now datetime = dbo.pcr_fx_gettime()
 
 	-- Sales price to discount
@@ -43,7 +43,7 @@ begin
 	from [dbo].[fin_products], #productStudents ps
 	where ps.productId = fin_products.product_id
 
-	declare @totals table (total decimal(18, 2), eligible_for_entity_id int, eligible_for_entity_type varchar(20) )
+	declare @totals table (total decimal(18, 6), eligible_for_entity_id int, eligible_for_entity_type varchar(20) )
 	insert into @totals (total, eligible_for_entity_id, eligible_for_entity_type)
 	select sum(product_sale_price), ps.studentId, 'student'
 	from [dbo].[fin_products], #productStudents ps
@@ -64,10 +64,10 @@ begin
 		waiver_code varchar(50),
 		product_path int,
 		discount_order int,
-		fixed_amount decimal(18,2),
+		fixed_amount decimal(18,6),
 		percent_amount decimal(18,4),
 		total_percent_amount decimal(18,4),
-		actual_amount decimal(18,2)
+		actual_amount decimal(18,6)
 	)
 
 	declare @eligibleProductProducts table (
@@ -77,7 +77,7 @@ begin
 		eligible_for_entity_id int,
 		eligible_for_entity_type varchar(20),
 		waiver_code varchar(50),
-		tmp_amount decimal(18,2),
+		tmp_amount decimal(18,6),
 		student_id int,
 		product_student_id int
 	)
@@ -389,8 +389,8 @@ begin
 
 	declare @pathResults table (
 		path_num int,
-		cur_total decimal(18,2),
-		cur_total_tmp decimal(18,2)
+		cur_total decimal(18,6),
+		cur_total_tmp decimal(18,6)
 	)
 
 	insert into @pathResults
@@ -410,7 +410,7 @@ begin
 		student_id int,
 		waiver_code varchar(50),
 		account_id int,
-		amount decimal(18,2)
+		amount decimal(18,6)
 	)
 
 
@@ -452,8 +452,8 @@ begin
 			begin
 
 				declare @itemCount int, 
-					@itemTotal decimal(18,2),
-					@remainder decimal(18,2),
+					@itemTotal decimal(18,6),
+					@remainder decimal(18,6),
 					@remainderId int
 
 				select @itemCount = count(*), @itemTotal = sum(fin_products.product_sale_price)
@@ -609,12 +609,12 @@ begin
 	-- Because 10+15=25 > 20, you apply first two. Otherwise, you would apply the non-stackable discount
 
 	declare @bestPath table(path_num int)
-	
+
 	--case 1 apply all stackable only
-	declare @stackableTotal decimal(18,2) = coalesce((select sum(cur_total) from @pathResults d where path_num = 0), 0.0)
+	declare @stackableTotal decimal(18,6) = coalesce((select sum(cur_total) from @pathResults d where path_num = 0), 0.0)
 
 	--case 2 apply non stackable only
-	declare @nonStackableTotal decimal(18,2) = 0.0
+	declare @nonStackableTotal decimal(18,6) = 0.0
 	declare @nonStackableType varchar(20)
 	select top 1 @nonStackableTotal =  coalesce(sum(cur_total), 0.0), @nonStackableType = coalesce(eligible_for_entity_type, 'xxx') 
 	from (select cur_total, ROW_NUMBER() over (partition by eligible_for_entity_id,  coalesce(eligible_for_entity_type, 'xxx') order by  cur_total asc) as order_number,
@@ -644,7 +644,7 @@ begin
 		product_id int,
 		product_desc varchar(500),
 		waiver_code varchar(50),
-		amount decimal(18,2), 
+		amount decimal(18,6), 
 		account_id int,
 		is_deposit bit,
 		student_id int
