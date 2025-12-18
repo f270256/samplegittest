@@ -64,7 +64,6 @@ begin
 		waiver_code varchar(50),
 		product_path int,
 		discount_order int,
-		is_stackable bit,
 		fixed_amount decimal(18,6),
 		percent_amount decimal(18,4),
 		total_percent_amount decimal(18,4),
@@ -87,7 +86,7 @@ begin
 
 	-- Discount without waivecode
 	insert into @eligibleProducts
-	(product_id, account_id, eligible_for_entity_id, eligible_for_entity_type, count_of_product_discounts, is_stackable)
+	(product_id, account_id, eligible_for_entity_id, eligible_for_entity_type, count_of_product_discounts)
 	select fin_products.product_id, fin_products.default_revenue_account_id,
 		case when fin_products.restriction_type = 'PerCamper' then ps.studentId 
 			when fin_products.restriction_type = 'PerFamily' then @householdIdLocal
@@ -95,8 +94,7 @@ begin
 		case when fin_products.restriction_type = 'PerCamper' then 'Student'
 			when fin_products.restriction_type = 'PerFamily' then 'Household'
 			else null end eligible_for,
-		count(*) total,
-		fin_products.is_stackable
+		count(*) total
 	from fin_products, [dbo].[fin_discounts_eligible_products] e, #productStudents ps
 	where eligible_product_id = ps.productId
 	and fin_products.product_id = e.product_id
@@ -176,7 +174,7 @@ begin
 
 	-- Discount with waivecode
 	insert into @eligibleProducts
-	(product_id, account_id, eligible_for_entity_id, eligible_for_entity_type, count_of_product_discounts, waiver_code, is_stackable)
+	(product_id, account_id, eligible_for_entity_id, eligible_for_entity_type, count_of_product_discounts, waiver_code)
 	select fin_products.product_id, fin_products.default_revenue_account_id,
 		case when fin_products.restriction_type = 'PerCamper' then ps.studentId 
 			when fin_products.restriction_type = 'PerFamily' then @householdIdLocal
@@ -185,8 +183,7 @@ begin
 			when fin_products.restriction_type = 'PerFamily' then 'Household'
 			else null end eligible_for,
 		count(*) total,
-		fin_product_waiver_codes.waiver_code,
-		fin_products.is_stackable
+		fin_product_waiver_codes.waiver_code
 	from fin_products, [dbo].[fin_discounts_eligible_products] e, #productStudents ps, fin_product_waiver_codes, #waiverCodes waivers
 	where eligible_product_id = ps.productId
 	and fin_products.product_id = e.product_id
@@ -359,7 +356,7 @@ begin
 	-- Calculate best discount by stackability and order
 	-- case when percent_or_fixed = 'Percent' then 
 	update @eligibleProducts
-	set product_path = case when is_stackable = 1 then 0 else ep.id end,
+	set product_path = case when fin_products.is_stackable = 1 then 0 else ep.id end,
 		discount_order = fin_products.discount_order,
 		fixed_amount = case when percent_or_fixed = 'fixed' then product_sale_price
 			-- Evenly split discount between product if fixedpersession and discount_once_per_day is not set
@@ -374,12 +371,12 @@ begin
 	
 	-- Include per camp stacklable discounts as an option with id as product_path
 	insert into @eligibleProducts
-	(product_id, account_id, eligible_for_entity_id, eligible_for_entity_type, count_of_product_discounts, waiver_code, product_path, discount_order, is_stackable, fixed_amount, percent_amount, actual_amount, total_percent_amount)
-	select ep.product_id, account_id, eligible_for_entity_id, eligible_for_entity_type, count_of_product_discounts, waiver_code, ep.id, ep.discount_order, is_stackable, fixed_amount, percent_amount, actual_amount, total_percent_amount
+	(product_id, account_id, eligible_for_entity_id, eligible_for_entity_type, count_of_product_discounts, waiver_code, product_path, discount_order, fixed_amount, percent_amount, actual_amount, total_percent_amount)
+	select ep.product_id, account_id, eligible_for_entity_id, eligible_for_entity_type, count_of_product_discounts, waiver_code, ep.id, ep.discount_order, fixed_amount, percent_amount, actual_amount, total_percent_amount
 	from @eligibleProducts ep, fin_products
 	where ep.product_id = fin_products.product_id
 	and eligible_for_entity_type = 'student'
-	and is_stackable = 1
+	and fin_products.is_stackable = 1
 
 
 	-- Evenly split discount between students.  Maybe should be prorated.
@@ -400,7 +397,6 @@ begin
 	(path_num, cur_total, cur_total_tmp)
 	select distinct product_path, @total, @total
 	from @eligibleProducts ep
-	where (is_stackable = 0 or product_path = 0)
 
 	declare @discountsApplied table (
 		id int identity(1,1),
@@ -527,8 +523,6 @@ begin
 					else - coalesce(cur_discounted_total, 0.0) - fin_products.product_sale_price
 					end
 			from @eligibleProducts ep
-			inner join @pathResults pr on
-			  (pr.path_num = ep.product_path)
 			inner join @eligibleProductProducts epp on
 			  (epp.discount_product_id = ep.product_id
 			   and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
@@ -559,8 +553,6 @@ begin
 					else - coalesce(cur_discounted_total, 0.0) - fin_products.product_sale_price
 					end
 			from @eligibleProducts ep			
-			inner join @pathResults pr on
-			  (pr.path_num = ep.product_path)
 			inner join @eligibleProductProducts epp on
 			  (epp.discount_product_id = ep.product_id
 			   and coalesce(epp.eligible_for_entity_type, 'xxx') = coalesce(ep.eligible_for_entity_type, 'xxx')
@@ -609,7 +601,7 @@ begin
 
 
 	update @pathResults
-	set cur_total = (select sum(amount) from @discountsApplied d where d.product_path = pr.path_num)
+	set cur_total = coalesce((select sum(case when amount < 0 then amount else 0 end) from @discountsApplied d where d.product_path = pr.path_num), 0.0)
 	from @pathResults pr
 
 	--calculate the highest discount combination and apply it
@@ -629,7 +621,6 @@ begin
 	eligible_for_entity_type, discount_order from @pathResults r, @eligibleProducts rp
 		where r.path_num = rp.product_path
 		and path_num > 0
-		and rp.is_stackable = 0
 	)t where order_number = 1 
 	group by coalesce(eligible_for_entity_type, 'xxx')
 	order by sum(cur_total) asc, min(discount_order) asc
@@ -645,7 +636,6 @@ begin
 			 from @pathResults r, @eligibleProducts rp
 				where path_num = rp.product_path
 				and path_num > 0
-				and rp.is_stackable = 0
 			)t where order_number = 1
 			and coalesce(eligible_for_entity_type, 'xxx') = @nonStackableType
 
