@@ -707,8 +707,8 @@ begin
 	  (da.discount_product_id = p.product_id)
 	left join fin_products orig_p on
 	  (da.originating_product_id = orig_p.product_id)
-	inner join @bestPath bp on 
-	   (product_path = path_num)
+	where da.amount > 0
+		or exists (select 1 from @bestPath bp where bp.path_num = da.product_path)
 	group by discount_product_id, p.Product_Sale_Description, waiver_code, coalesce(da.account_id, orig_p.default_revenue_account_id), student_id
 
 
