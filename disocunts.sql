@@ -637,7 +637,11 @@ begin
 
 
 	update @pathResults
-	set cur_total = (select sum(amount) from @discountsApplied d where d.product_path = pr.path_num)
+	set cur_total = (
+		select sum(case when amount < 0 then amount else 0 end)
+		from @discountsApplied d
+		where d.product_path = pr.path_num
+	)
 	from @pathResults pr
 
 	--calculate the highest discount combination and apply it
@@ -698,13 +702,21 @@ begin
 	--   (product_path = path_num)
 	select discount_product_id, p.Product_Sale_Description, waiver_code, sum(amount), 
 		coalesce(da.account_id, orig_p.default_revenue_account_id), student_id
-	from @discountsApplied da
+	from (
+		select *,
+			row_number() over (
+				partition by discount_product_id, coalesce(waiver_code, ''), coalesce(student_id, 0), coalesce(account_id, 0)
+				order by case when exists (select 1 from @bestPath bp where bp.path_num = da.product_path) then 0 else 1 end, id
+			) as rn
+		from @discountsApplied da
+		where da.amount > 0
+			or exists (select 1 from @bestPath bp where bp.path_num = da.product_path)
+	) da
 	inner join fin_products p on
 	  (da.discount_product_id = p.product_id)
 	left join fin_products orig_p on
 	  (da.originating_product_id = orig_p.product_id)
-	inner join @bestPath bp on 
-	   (product_path = path_num)
+	where da.rn = 1
 	group by discount_product_id, p.Product_Sale_Description, waiver_code, coalesce(da.account_id, orig_p.default_revenue_account_id), student_id
 
 
